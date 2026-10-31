@@ -1,0 +1,18 @@
+[package]
+name = "stellar-pay-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Soroban payment escrow/settlement contract with a one-way state machine"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
