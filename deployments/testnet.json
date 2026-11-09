@@ -1,0 +1,40 @@
+{
+  "network": "testnet",
+  "passphrase": "Test SDF Network ; September 2015",
+  "rpc_url": "https://soroban-testnet.stellar.org",
+  "contract_id": "CDB5PL5RITGAI6FBYTICPZMQIFROZEMXYMSKFGVK5NOUEX2XLYQ3IS4I",
+  "alias": "stellar-pay-core",
+  "wasm_sha256": "3de372a2fe0eff01b8d149c024f3c90366ee0058fd47e4b7490d49447623aa41",
+  "wasm_path": "target/wasm32v1-none/release/stellar_pay_core.wasm (stellar contract build --optimize)",
+  "token": {
+    "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "asset": "native (XLM), Stellar Asset Contract",
+    "decimals": 7
+  },
+  "config": {
+    "fee_bps": 100,
+    "reclaim_delay_seconds": 3600,
+    "reclaim_delay_note": "Short on purpose to allow manual testing on testnet. Do not reuse for production."
+  },
+  "identities": {
+    "note": "Public addresses only. Keys live in the local stellar keys store (sp-* identities).",
+    "deployer": "GABHC75FRC2EB5LQSBXPWMJATE25FNHIYB4WRE5MQHGS7SJ4UUFJPMQI",
+    "admin": "GAFXT4ZSQ3URW2YQSVTJEXXMFR5G5IABR4RVPXS66VH5TEOPURA3RMJB",
+    "operator": "GBD4O2LPIFSN2Y4PHNFCHNKGKBXVFKYD6B6SEBXFSW4AEO5T6DUOH4ZX",
+    "fee_collector": "GDWOAGPIC3QVJKGOXGGQEWXRTUMQ6N2P7EWAE4FS6RSWOUUYZXPMNMPQ",
+    "merchant": "GBQALWO42IYR46ANUJXSHW4VZ2VHNG6BOCIZPOTPUPWFSTIOZORGV7DU",
+    "payer": "GDMGBGM5CPD6KSDUKWCH4RTN4J4PC2W57LZ36TNEWEARJXI57KC2SN6S"
+  },
+  "versions": {
+    "stellar_cli": "30.0.1",
+    "soroban_sdk": "22.0.11"
+  },
+  "deployed_at": "2026-11-07",
+  "superseded": [
+    {
+      "contract_id": "CDBJWXG6V7I2GWQM26ZDXFWUCE624KC4ZHUWX5Q6ZHI3L4AKQWBPNK6Q",
+      "wasm_sha256": "137bc8fdffe4500a8d35d92c21a8a32b1b4401b10c392041eb4cbfcf252e9042",
+      "reason": "Pre-audit build (unbounded reclaim_delay, fee read at pay). Do not use."
+    }
+  ]
+}
