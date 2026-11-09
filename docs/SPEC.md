@@ -38,16 +38,16 @@ escrow.
 
 | Function | Auth | Effect / errors |
 |---|---|---|
-| `initialize(admin, token, fee_bps, fee_recipient, reclaim_delay)` | admin | One-time. `AlreadyInitialized`, `FeeTooHigh`, `InvalidAddress` (token or fee recipient = this contract). |
+| `initialize(admin, token, fee_bps, fee_recipient, reclaim_delay)` | admin | One-time. `AlreadyInitialized`, `FeeTooHigh`, `InvalidDelay` (`reclaim_delay` outside 1 hour to 90 days), `InvalidAddress` (token or fee recipient = this contract). |
 | `get_config()` | none | Read-only. `NotInitialized`. |
-| `create_payment(operator, merchant, payment_id, amount, reference, settle_mode)` | operator | → `Created`. `Paused`, `InvalidAmount` (≤ 0), `InvalidAddress` (merchant = contract), `AlreadyExists` (duplicate id). Token = configured token. |
-| `pay(payer, payment_id)` | payer (covers nested token transfer) | Snapshots `fee_bps` and `fee_recipient`. Manual: payer → contract, `Paid`. Auto: payer → merchant (`amount − fee`) and payer → fee recipient (`fee`), `Settled`. `Paused`, `NotFound`, `InvalidState`, `TokenNotAllowed`, `InvalidAddress` (payer = contract); token errors (e.g. insufficient balance) revert the whole call. |
+| `create_payment(operator, merchant, payment_id, amount, reference, settle_mode)` | operator | → `Created`. Snapshots `fee_bps` and `fee_recipient` from the config. `Paused`, `InvalidAmount` (≤ 0), `Overflow` (the maximum-fee split of `amount` would overflow), `InvalidAddress` (merchant = contract), `AlreadyExists` (duplicate id). Token = configured token. |
+| `pay(payer, payment_id)` | payer (covers nested token transfer) | Uses the fee terms snapshotted at `create_payment`. Manual: payer → contract, `Paid`. Auto: payer → merchant (`amount − fee`) and payer → fee recipient (`fee`), `Settled`. `Paused`, `NotFound`, `InvalidState`, `TokenNotAllowed`, `InvalidAddress` (payer = contract); token errors (e.g. insufficient balance) revert the whole call. |
 | `settle(payment_id)` | payment operator | `Paid → Settled`, contract → merchant and fee recipient. Works while paused. `NotFound`, `InvalidState`. |
 | `cancel(payment_id)` | payment operator | `Created → Cancelled`. `InvalidState`. |
 | `refund(payment_id)` | payment operator | `Paid → Refunded`, full `amount` to payer. Works while paused. |
 | `reclaim(payment_id)` | payer | `Paid → Refunded` once `ledger.timestamp ≥ paid_at + reclaim_delay`. Works while paused. `TooEarly`, `Overflow` (deadline overflows u64). |
 | `get_payment(payment_id)` | none | Read-only. `NotFound`. |
-| `set_fee(fee_bps, fee_recipient)` | admin | `FeeTooHigh`, `InvalidAddress`. Affects only payments paid afterwards. |
+| `set_fee(fee_bps, fee_recipient)` | admin | `FeeTooHigh`, `InvalidAddress`. Affects only payments created afterwards. |
 | `set_paused(paused)` | admin | Blocks `create_payment` and `pay` only. |
 | `propose_admin(new_admin)` | admin | Stores pending admin (a later call replaces it). |
 | `accept_admin()` | pending admin | `NotFound` if nothing pending. |
@@ -92,7 +92,7 @@ JSON examples: `docs/EVENTS.md`; XDR vectors: `docs/test-vectors.json`.
 
 `NotInitialized=1, AlreadyInitialized=2, NotFound=3, AlreadyExists=4,
 Unauthorized=5, InvalidAmount=6, InvalidState=7, Paused=8, TokenNotAllowed=9,
-FeeTooHigh=10, TooEarly=11, Overflow=12, InvalidAddress=13`. Codes are stable
+FeeTooHigh=10, TooEarly=11, Overflow=12, InvalidAddress=13, InvalidDelay=14`. Codes are stable
 and never renumbered. (`Unauthorized` is reserved; auth failures surface as
 host auth errors from `require_auth`.)
 
@@ -122,11 +122,11 @@ future v2 can read v1 records (to be tested when a v2 exists).
 
 | Threat | Mitigation |
 |---|---|
-| Malicious operator | Can stall (never settle) but not steal: destinations are fixed at create (merchant) and pay (payer, fee recipient). Payer can `reclaim` after `reclaim_delay`. |
+| Malicious operator | Can stall (never settle) but not steal: destinations are fixed at create (merchant, fee recipient) and pay (payer). Payer can `reclaim` after `reclaim_delay`. |
 | Malicious payer | Must authorize `pay` and fund it; cannot pay twice (state check) or reclaim early (`TooEarly`). |
 | Malicious admin | Fee capped at 5% and snapshotted at `create_payment`; pause cannot block exits; no function lets admin move escrow. |
 | Malicious token | Out of scope by configuration: only a vetted SAC is configured. |
-| Griefing (id squatting) | Payment ids are random 32-byte values chosen by the operator; creation needs operator auth. |
+| Id squatting (review finding M1, accepted for v0.1.0) | Ids are first come, first served and `pay` signs only the id, so an attacker who creates an id first under their own merchant could receive a payment meant for another. Off-chain mitigation: ids are random 32-byte values, and the API builds a pay transaction only after checking that the on-chain merchant, amount and operator match its record. Direct integrators must do the same check. A contract-level fix (bind `pay` to merchant and amount) changes the interface and is planned for a later version. |
 | Replay / duplicate processing | Unique ids (`AlreadyExists`), one-way state machine, `settle`/`refund` once. |
 | Initialization front-running | `initialize` requires admin auth, but anyone can initialize an uninitialized contract with their own admin. Operational mitigation: deploy and initialize back-to-back and verify `get_config` before use; redeploy if it does not match. |
 | Funds sent to the contract itself | `merchant`, `payer`, `fee_recipient` and `token` may not be the contract address. |

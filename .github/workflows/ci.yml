@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly: catches new RustSec advisories and toolchain drift.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: fmt, clippy, test, wasm build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build --target wasm32-unknown-unknown --release
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit --locked
+      # Each ignored advisory is triaged in docs/AUDIT_TRIAGE.md. Remove the
+      # flag when the upstream fix lands.
+      - run: >-
+          cargo audit
+          --ignore RUSTSEC-2026-0387
+          --ignore RUSTSEC-2024-0388
+          --ignore RUSTSEC-2024-0436
+          --ignore RUSTSEC-2026-0097

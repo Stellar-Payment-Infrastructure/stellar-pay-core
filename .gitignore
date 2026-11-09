@@ -1,0 +1,6 @@
+/target
+test_snapshots/
+.env
+# Local Stellar CLI config can hold secret keys
+.stellar/
+.soroban/

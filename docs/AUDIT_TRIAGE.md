@@ -1,7 +1,8 @@
 # Dependency audit triage
 
-Run: `cargo audit` on 2026-11-04. This is a dependency triage only. It is not the
-adversarial contract review described in the playbook, which is still pending.
+Run: `cargo audit` on 2026-11-04, re-checked on 2026-11-09 (no new advisories). This is a dependency
+triage only; the adversarial contract review is in `SECURITY_REVIEW.md`. CI runs `cargo audit` with exactly
+these advisories ignored.
 
 | Advisory | Crate | Status | Rationale |
 |---|---|---|---|
