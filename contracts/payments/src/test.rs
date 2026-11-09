@@ -21,7 +21,7 @@ use soroban_sdk::{
 use crate::{
     split_amount, CancelledEvent, CreatedEvent, DataKey, Error, FeeChangedEvent, PaidEvent,
     PausedEvent, PaymentsContract, PaymentsContractClient, RefundReason, RefundedEvent, SettleMode,
-    SettledEvent, Status, MAX_FEE_BPS,
+    SettledEvent, Status, MAX_FEE_BPS, MAX_RECLAIM_DELAY, MIN_RECLAIM_DELAY,
 };
 
 const FEE_BPS: u32 = 100;
@@ -318,7 +318,8 @@ fn create_payment_stores_created_payment() {
     assert_eq!(p.status, Status::Created);
     assert_eq!(p.fee_bps, FEE_BPS);
     assert_eq!(p.created_at, START_TS);
-    assert!(p.payer.is_none() && p.fee_recipient.is_none());
+    assert!(p.payer.is_none());
+    assert_eq!(p.fee_recipient, Some(s.fee_recipient.clone()));
     assert!(p.paid_at.is_none() && p.closed_at.is_none());
 
     assert_eq!(events.len(), 1);
@@ -776,17 +777,50 @@ fn reclaim_rejects_wrong_states() {
 }
 
 #[test]
-fn reclaim_deadline_overflow_is_an_error_not_a_panic() {
+fn initialize_rejects_unreasonable_reclaim_delay() {
+    for bad in [0u64, MIN_RECLAIM_DELAY - 1, MAX_RECLAIM_DELAY + 1, u64::MAX] {
+        let s = Setup::new();
+        let r =
+            s.client
+                .try_initialize(&s.admin, &s.token.address, &FEE_BPS, &s.fee_recipient, &bad);
+        assert_eq!(r, Err(Ok(Error::InvalidDelay)), "delay {bad}");
+    }
+    for ok in [MIN_RECLAIM_DELAY, MAX_RECLAIM_DELAY] {
+        let s = Setup::new();
+        s.client
+            .initialize(&s.admin, &s.token.address, &FEE_BPS, &s.fee_recipient, &ok);
+    }
+}
+
+#[test]
+fn payer_can_always_reclaim_after_the_maximum_delay() {
     let s = Setup::new();
     s.client.initialize(
         &s.admin,
         &s.token.address,
         &FEE_BPS,
         &s.fee_recipient,
-        &u64::MAX,
+        &MAX_RECLAIM_DELAY,
     );
-    let (id, _) = s.paid(1, 100);
-    assert_eq!(s.client.try_reclaim(&id), Err(Ok(Error::Overflow)));
+    let (id, payer) = s.paid(1, 100);
+    s.advance(MAX_RECLAIM_DELAY);
+    s.client.reclaim(&id);
+    assert_eq!(s.balance(&payer), 100);
+}
+
+#[test]
+fn create_rejects_amounts_whose_fee_split_would_overflow() {
+    let s = Setup::new();
+    s.init();
+    let r = s.client.try_create_payment(
+        &s.operator,
+        &s.merchant,
+        &s.id(1),
+        &(i128::MAX / 100),
+        &s.reference(),
+        &SettleMode::Manual,
+    );
+    assert_eq!(r, Err(Ok(Error::Overflow)));
 }
 
 // ---------------------------------------------------------------------- pause
@@ -848,16 +882,22 @@ fn fee_change_does_not_affect_paid_payments() {
 }
 
 #[test]
-fn fee_is_snapshotted_at_pay_not_create() {
+fn fee_terms_are_fixed_at_create_not_pay() {
     let s = Setup::new();
     s.init();
     let id = s.create(1, 10_000, SettleMode::Manual);
-    s.client.set_fee(&200, &s.fee_recipient);
-    let payer = s.funded_payer(10_000);
+    let auto = s.create(2, 10_000, SettleMode::Auto);
+    // Admin raises the fee and re-points the recipient before the payers pay.
+    let other = Address::generate(&s.env);
+    s.client.set_fee(&MAX_FEE_BPS, &other);
+    let payer = s.funded_payer(20_000);
     s.client.pay(&payer, &id);
-    assert_eq!(s.client.get_payment(&id).fee_bps, 200);
+    s.client.pay(&payer, &auto);
+    assert_eq!(s.client.get_payment(&id).fee_bps, FEE_BPS);
     s.client.settle(&id);
-    assert_eq!(s.balance(&s.fee_recipient), 200);
+    assert_eq!(s.balance(&s.fee_recipient), 200); // 1% of each, original recipient
+    assert_eq!(s.balance(&other), 0);
+    assert_eq!(s.balance(&s.merchant), 19_800);
 }
 
 #[test]
@@ -1018,7 +1058,7 @@ fn invariants_hold_under_random_operation_sequences() {
         let mut model_balance: StdVec<i128> = vec![1_000_000; payers.len()];
         let mut merchant = 0_i128;
         let mut fees = 0_i128;
-        // per payment: (amount, mode, status, payer index, fee_bps at pay)
+        // per payment: (amount, mode, status, payer index, fee_bps at create)
         let mut model: StdVec<(i128, SettleMode, Status, usize, u32)> = StdVec::new();
         let mut fee_bps = FEE_BPS;
 
@@ -1034,7 +1074,7 @@ fn invariants_hold_under_random_operation_sequences() {
                         SettleMode::Manual
                     };
                     s.create(n as u8, amount, mode);
-                    model.push((amount, mode, Status::Created, usize::MAX, 0));
+                    model.push((amount, mode, Status::Created, usize::MAX, fee_bps));
                 }
                 2 | 3 if n > 0 => {
                     let i = rng.below(n as u64) as usize;
@@ -1045,9 +1085,8 @@ fn invariants_hold_under_random_operation_sequences() {
                         assert!(r.is_ok(), "seed {seed}: pay should succeed");
                         model_balance[p] -= entry.0;
                         entry.3 = p;
-                        entry.4 = fee_bps;
                         if entry.1 == SettleMode::Auto {
-                            let (m, f) = split_amount(entry.0, fee_bps).unwrap();
+                            let (m, f) = split_amount(entry.0, entry.4).unwrap();
                             merchant += m;
                             fees += f;
                             entry.2 = Status::Settled;

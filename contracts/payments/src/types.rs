@@ -85,7 +85,7 @@ pub struct Payment {
     pub payer: Option<Address>,
     pub token: Address,
     pub amount: i128,
-    /// Copied from config at create; re-snapshotted at `pay` and fixed after.
+    /// Copied from config at create and fixed for the life of the payment.
     pub fee_bps: u32,
     /// Snapshotted at `pay` so later config changes don't affect in-flight payments.
     pub fee_recipient: Option<Address>,

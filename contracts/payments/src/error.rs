@@ -32,4 +32,6 @@ pub enum Error {
     Overflow = 12,
     /// An address argument is not allowed here (e.g. the contract itself).
     InvalidAddress = 13,
+    /// `reclaim_delay` is outside `MIN_RECLAIM_DELAY..=MAX_RECLAIM_DELAY`.
+    InvalidDelay = 14,
 }

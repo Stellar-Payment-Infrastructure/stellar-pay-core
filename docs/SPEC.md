@@ -32,7 +32,7 @@ escrow.
 | operator | per payment (`create_payment` arg) | `create_payment`, `settle`, `cancel`, `refund` for its payments. Funds can only go to the merchant, the fee recipient or the payer, so a rogue operator can stall but not steal. In the hosted model the API's service key is the operator; self-hosters may use operator = merchant. |
 | merchant | per payment | Receives `amount − fee` on settle. No powers. |
 | payer | set by `pay` | Funds the payment; may `reclaim` after `reclaim_delay`. |
-| fee recipient | config, snapshotted at `pay` | Receives `fee` on settle. |
+| fee recipient | config, snapshotted at `create_payment` | Receives `fee` on settle. |
 
 ## 3. Functions
 
@@ -68,7 +68,7 @@ after every step of a randomized, model-based operation sequence test
 4. `fee + merchant_amount == amount`; `fee = floor(amount × fee_bps / 10_000)`.
 5. Pausing never traps funds (`settle`, `refund`, `reclaim` ignore pause).
 6. Admin cannot move escrowed funds.
-7. `fee_bps` and `fee_recipient` are snapshotted at `pay`.
+7. `fee_bps` and `fee_recipient` are snapshotted at `create_payment`.
 8. Operator cannot redirect funds to an arbitrary address (no function takes
    a destination address at settle/refund time).
 
@@ -124,7 +124,7 @@ future v2 can read v1 records (to be tested when a v2 exists).
 |---|---|
 | Malicious operator | Can stall (never settle) but not steal: destinations are fixed at create (merchant) and pay (payer, fee recipient). Payer can `reclaim` after `reclaim_delay`. |
 | Malicious payer | Must authorize `pay` and fund it; cannot pay twice (state check) or reclaim early (`TooEarly`). |
-| Malicious admin | Fee capped at 5% and snapshotted at `pay`; pause cannot block exits; no function lets admin move escrow. |
+| Malicious admin | Fee capped at 5% and snapshotted at `create_payment`; pause cannot block exits; no function lets admin move escrow. |
 | Malicious token | Out of scope by configuration: only a vetted SAC is configured. |
 | Griefing (id squatting) | Payment ids are random 32-byte values chosen by the operator; creation needs operator auth. |
 | Replay / duplicate processing | Unique ids (`AlreadyExists`), one-way state machine, `settle`/`refund` once. |

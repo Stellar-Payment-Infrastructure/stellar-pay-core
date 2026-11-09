@@ -21,7 +21,7 @@
 //! 4. `fee + merchant_amount == amount` (checked math, floor division on the fee).
 //! 5. Pausing never traps funds: `settle`, `refund`, `reclaim` work while paused.
 //! 6. The admin cannot move escrowed funds (powers: capped fee, pause, admin transfer).
-//! 7. Fee bps and fee recipient are snapshotted at `pay`.
+//! 7. Fee bps and fee recipient are snapshotted at `create_payment`.
 //! 8. The operator cannot redirect funds to an arbitrary address.
 //!
 //! See `docs/SPEC.md` for the full specification and threat model.
@@ -49,6 +49,12 @@ pub use types::{Condition, Config, DataKey, Payment, RefundReason, SettleMode, S
 
 /// Storage schema version written into new `Config` and `Payment` records.
 pub const STORAGE_VERSION: u32 = 1;
+
+/// Bounds for `reclaim_delay` (seconds). Without them an admin could set a
+/// delay that makes `reclaim` impossible (payer funds locked if the operator
+/// disappears) or zero (payer reclaims right after receiving the goods).
+pub const MIN_RECLAIM_DELAY: u64 = 3_600;
+pub const MAX_RECLAIM_DELAY: u64 = 90 * 24 * 3_600;
 
 /// Reads the config and keeps the contract instance alive.
 fn load_config(env: &Env) -> Result<Config, Error> {
@@ -97,6 +103,9 @@ impl PaymentsContract {
         if fee_bps > MAX_FEE_BPS {
             return Err(Error::FeeTooHigh);
         }
+        if !(MIN_RECLAIM_DELAY..=MAX_RECLAIM_DELAY).contains(&reclaim_delay) {
+            return Err(Error::InvalidDelay);
+        }
         let this = env.current_contract_address();
         if token == this || fee_recipient == this {
             return Err(Error::InvalidAddress);
@@ -144,6 +153,8 @@ impl PaymentsContract {
         if amount <= 0 {
             return Err(Error::InvalidAmount);
         }
+        // Reject amounts whose fee split could overflow later (settle would fail forever).
+        split_amount(amount, MAX_FEE_BPS)?;
         if merchant == env.current_contract_address() {
             return Err(Error::InvalidAddress);
         }
@@ -159,7 +170,7 @@ impl PaymentsContract {
             token: config.token.clone(),
             amount,
             fee_bps: config.fee_bps,
-            fee_recipient: None,
+            fee_recipient: Some(config.fee_recipient.clone()),
             reference,
             settle_mode,
             condition: Condition::None,
@@ -203,10 +214,13 @@ impl PaymentsContract {
 
         let now = env.ledger().timestamp();
         payment.payer = Some(payer.clone());
-        payment.fee_bps = config.fee_bps;
-        payment.fee_recipient = Some(config.fee_recipient.clone());
+        // Fee terms were snapshotted at `create_payment`; a later `set_fee` does not change them.
         payment.paid_at = Some(now);
 
+        let fee_recipient = payment
+            .fee_recipient
+            .clone()
+            .unwrap_or_else(|| config.fee_recipient.clone());
         let token_client = token::Client::new(&env, &payment.token);
         match payment.settle_mode {
             SettleMode::Manual => {
@@ -223,14 +237,14 @@ impl PaymentsContract {
                 storage::write_payment(&env, &payment_id, &payment);
                 token_client.transfer(&payer, &payment.merchant, &merchant_amount);
                 if fee > 0 {
-                    token_client.transfer(&payer, &config.fee_recipient, &fee);
+                    token_client.transfer(&payer, &fee_recipient, &fee);
                 }
                 events::paid(&env, &payment_id, &payer, &payment, now);
                 events::settled(
                     &env,
                     &payment_id,
                     &payment,
-                    &config.fee_recipient,
+                    &fee_recipient,
                     (merchant_amount, fee),
                     now,
                 );
@@ -240,7 +254,7 @@ impl PaymentsContract {
     }
 
     /// Settles a `Paid` payment: `amount - fee` to the merchant and `fee` to
-    /// the fee recipient snapshotted at `pay`. Requires the payment's
+    /// the fee recipient snapshotted at `create_payment`. Requires the payment's
     /// operator auth. Allowed while paused.
     pub fn settle(env: Env, payment_id: BytesN<32>) -> Result<(), Error> {
         load_config(&env)?;
